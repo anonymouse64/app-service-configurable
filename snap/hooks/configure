@@ -1,17 +1,172 @@
 #!/bin/bash -e
 
-profile=$(snapctl get "profile")
+declare -A conf_to_env
 
-if [ -z "$profile" ]; then
-    echo "profile is empty!"
-    exit 0
-fi
+# [Writable] - not yet supported
+# conf_to_env["writable.log-level"]="BootTimeout"
 
-if [ "$profile" == "default" ]; then
-    exit 0;
-fi
+# [Service]
+conf_to_env["service.boot-timeout"]="SERVICE_BOOTTIMEOUT"
+conf_to_env["service.check-interval"]="SERVICE_CHECKINTERVAL"
+conf_to_env["service.host"]="SERVICE_HOST"
+conf_to_env["service.server-bind-addr"]="SERVICE_SERVERBINDADDR"
+conf_to_env["service.port"]="SERVICE_PORT"
+conf_to_env["service.protocol"]="SERVICE_PROTOCOL"
+conf_to_env["service.read-max-limit"]="SERVICE_READMAXLIMIT"
+conf_to_env["service.startup-msg"]="SERVICE_STARTUPMSG"
+conf_to_env["service.timeout"]="SERVICE_TIMEOUT"
 
-if [ ! -f "$SNAP_DATA/config/res/$profile/configuration.toml" ]; then
-    echo "invalid setting profile $profile specified; no configuration.toml found"
-    exit 1;
-fi
+# [Registry]
+conf_to_env["registry.host"]="REGISTRY_HOST"
+conf_to_env["registry.port"]="REGISTRY_PORT"
+conf_to_env["registry.type"]="REGISTRY_TYPE"
+
+# [Database]
+conf_to_env["database.type"]="DATABASE_TYPE"
+conf_to_env["database.host"]="DATABASE_HOST"
+conf_to_env["database.port"]="DATABASE_PORT"
+conf_to_env["database.timeout"]="DATABASE_TIMEOUT"
+
+# [SecretStore]
+conf_to_env["secretstore.host"]="SECRETSTORE_HOST"
+conf_to_env["secretstore.port"]="SECRETSTORE_PORT"
+conf_to_env["secretstore.path"]="SECRETSTORE_PATH"
+conf_to_env["secretstore.protocol"]="SECRETSTORE_PROTOCOL"
+conf_to_env["secretstore.root-ca-cert-path"]="SECRETSTORE_ROOTCACERTPATH"
+conf_to_env["secretstore.server-name"]="SECRETSTORE_SERVERNAME"
+conf_to_env["secretstore.token-file"]="SECRETSTORE_TOKENFILE"
+conf_to_env["secretstore.additional-retry-attempts"]="SECRETSTORE_ADDITIONALRETRYATTEMPTS"
+conf_to_env["secretstore.retry-wait-period"]="SECRETSTORE_RETRYWAITPERIOD"
+# [SecretStore.Authentication]
+conf_to_env["secretstore.authentication.auth-type"]="SECRETSTORE_AUTHENTICATION_AUTHTYPE"
+
+# [SecretStoreExclusive]
+conf_to_env["secretstore-ex.host"]="SECRETSTOREEXCLUSIVE_HOST"
+conf_to_env["secretstore-ex.port"]="SECRETSTOREEXCLUSIVE_PORT"
+conf_to_env["secretstore-ex.path"]="SECRETSTOREEXCLUSIVE_PATH"
+conf_to_env["secretstore-ex.protocol"]="SECRETSTOREEXCLUSIVE_PROTOCOL"
+conf_to_env["secretstore-ex.root-ca-cert-path"]="SECRETSTOREEXCLUSIVE_ROOTCACERTPATH"
+conf_to_env["secretstore-ex.server-name"]="SECRETSTOREEXCLUSIVE_SERVERNAME"
+conf_to_env["secretstore-ex.token-file"]="SECRETSTOREEXCLUSIVE_TOKENFILE"
+conf_to_env["secretstore-ex.additional-retry-attempts"]="SECRETSTOREEXCLUSIVE_ADDITIONALRETRYATTEMPTS"
+conf_to_env["secretstore-ex.retry-wait-period"]="SECRETSTOREEXCLUSIVE_RETRYWAITPERIOD"
+# [SecretStore.Authentication]
+conf_to_env["secretstore-ex.authentication.auth-type"]="SECRETSTOREEXCLUSIVE_AUTHENTICATION_AUTHTYPE"
+
+# [Clients.CoreData]
+conf_to_env["clients.coredata.host"]="CLIENTS_COREDATA_HOST"
+conf_to_env["clients.coredata.port"]="CLIENTS_COREDATA_PORT"
+conf_to_env["clients.coredata.protocol"]="CLIENTS_COREDATA_PROTOCOL"
+
+# [Binding]
+conf_to_env["binding.type"]="BINDING_TYPE"
+conf_to_env["binding.subscribe-topic"]="BINDING_SUBSCRIBE_TOPIC"
+conf_to_env["binding.publish-topic"]="BINDING_PUBLISH_TOPIC"
+
+# [MessageBus]
+conf_to_env["message-bus.type"]="MESSAGEBUS_TYPE"
+# [MessageBus.SubscribeHost]
+conf_to_env["message-bus.subscribe-host.host"]="MESSAGEBUS_SUBSCRIBEHOST_HOST"
+conf_to_env["message-bus.subscribe-host.port"]="MESSAGEBUS_SUBSCRIBEHOST_PORT"
+conf_to_env["message-bus.subscribe-host.protocol"]="MESSAGEBUS_SUBSCRIBEHOST_PROTOCOL"
+
+# [MessageBus.PublishHost]
+conf_to_env["message-bus.publish-host.host"]="MESSAGEBUS_PUBLISHHOST_HOST"
+conf_to_env["message-bus.publish-host.port"]="MESSAGEBUS_PUBLISHHOST_PORT"
+conf_to_env["message-bus.publish-host.protocol"]="MESSAGEBUS_PUBLISHHOST_PROTOCOL"
+
+handle_config () {
+    config=$(snapctl get "env")
+    if [ -z "$config" ]; then
+        return
+    fi
+    
+    # the following logic to convert a JSON key/value array to a bash map is
+    # based on the following stackoverflow example:
+    #
+    # https://stackoverflow.com/questions/26717277/converting-a-json-object-into-a-bash-associative-array
+    #
+    # FIXME: one issue with this implementation is that it strips quotes that may have been specified
+    # when 'snap set' was called. This could cause problems with values that contain spaces or other
+    # special characters.
+
+    map_init=$(echo "$config" | jq -r '. as $in | reduce leaf_paths as $path ({}; . + { ($path | map(tostring) | join(".")): $in | getpath($path) }) | to_entries | map("[\(.key)]=\(.value)") | reduce .[] as $item ("configMap=("; . + ($item|@text) + " ") + ")"')
+
+    logger "edgex-app-svc-cfg: configure: $map_init"
+
+    local mapAsString
+    mapAsString="$map_init"
+    local -A "$mapAsString"
+
+    # Note - there's only a single .env file created
+    # at the top-level of /config/res which applies
+    # to **all** profiles
+    file="$SNAP_DATA/config/res/asc.env"
+
+    # if no $service.env file exists, create it
+    # TODO: get rid of fore loop, and just access
+    # the first (and only) element in the array
+    if [ ! -f "$file" ]; then
+	logger "edgex:configure: $file NOT FOUND!"
+        for ckey in "${!configMap[@]}"; do
+            val="${configMap["$ckey"]}"
+	    env="${conf_to_env["$ckey"]}"
+
+            # TODO: consider validation of $service & $ckey cominations
+	    # Ex. specifying client.support-scheduler for core-data
+
+            logger "edgex:configure: writing $env=$val to $file"
+            echo "export $env=$val" > "$file"
+            break
+        done
+    else
+        logger "edgex:configure: $file already exists"
+        for key in "${!configMap[@]}"; do
+            val="${configMap["$key"]}"
+	    env="${conf_to_env["$key"]}"
+
+            # TODO: consider validation of $service & $ckey cominations
+	    # Ex. specifying client.support-scheduler for core-data
+
+            found=$(grep "$env" "$file")
+	    if [ -z "$found" ]; then
+		echo "export $env=$val" >> "$file"
+	    else
+                # The following expression uses a negative
+		# address expression to skip updating the line if
+		# matches the existing snapd value
+		sed -i -e "/export $env=$val/! s@$env=.*@$env=$val@" "$file"
+	    fi
+        done
+    fi
+}
+
+handle_profile() {
+
+    profile=$(snapctl get "profile")
+
+    if [ -z "$profile" ]; then
+        echo "profile is empty!"
+        exit 0
+    fi
+
+    if [ "$profile" == "default" ]; then
+        exit 0;
+    fi
+
+    if [ ! -f "$SNAP_DATA/config/res/$profile/configuration.toml" ]; then
+        echo "invalid setting profile $profile specified; no configuration.toml found"
+        exit 1;
+    fi
+}
+
+handle_config
+handle_profile
+
+# profile
+
+
+config=$(snapctl get "env")
+
+
+
