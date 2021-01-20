@@ -38,6 +38,11 @@ slots:
     content: edgex-secretstore-token
     source:
       write: [$SNAP_DATA/edgex-application-service]
+plugs:
+  edgex-profile-config:
+    interface: content
+    content: edgex-profile-config
+    target: [$SNAP_DATA/config/res]
 
 apps:
   app-service-configurable:
