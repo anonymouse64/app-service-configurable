@@ -59,6 +59,12 @@ slots:
     source:
       write: [$SNAP_DATA/edgex-application-service]
 
+plugs:
+  edgex-profiles-config:
+    interface: content
+    content: edgex-profiles-config
+    target: $SNAP_DATA/config/res
+
 apps:
   app-service-configurable:
     adapter: full
