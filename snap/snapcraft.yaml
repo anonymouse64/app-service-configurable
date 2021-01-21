@@ -103,6 +103,17 @@ parts:
     prime:
       - "-*"
 
+  hooks:
+    source: ./hooks
+    plugin: make
+    after: [go]
+    override-build: |
+      cd $SNAPCRAFT_PART_SRC
+      make build
+      install -DT ./configure "$SNAPCRAFT_PART_INSTALL/configure"
+    organize:
+      configure: snap/hooks/configure
+
   app-service-config:
     source: .
     plugin: make
