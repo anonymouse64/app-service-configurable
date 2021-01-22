@@ -22,11 +22,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-        "log/syslog"
+	"log/syslog"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/edgex-go/app-service-configurable/hooks"
 )
 
 var log syslog.Writer
@@ -112,11 +114,10 @@ func (c *Client) snapGetBool(key string, target *bool) {
 	}
 }
 
-
 // it may return false on e.g. permission issues.
 func FileExists(path string) bool {
-        _, err := os.Stat(path)
-        return err == nil
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func handleVal(p string, k string, v interface{}, flatM map[string]interface{}) {
@@ -186,7 +187,7 @@ func handleSvcConf(env string) {
 	log.Info(fmt.Sprintf("edgex-asc:configure:handleSvcConf about write %s", path))
 	for k, v := range flatM {
 		log.Info(fmt.Sprintf("%s=%v", k, v))
-		_, err := f.WriteString(fmt.Sprintf("export %s=%s\n", confToEnv[k], v))
+		_, err := f.WriteString(fmt.Sprintf("export %s=%s\n", hooks.ConfToEnv[k], v))
 		if err != nil {
 			log.Err(fmt.Sprintf("edgex-asc:configure:handleSvcConf: can't open %s - %v", path, err))
 			os.Exit(1)
@@ -227,8 +228,8 @@ func main() {
 	}
 
 	// TODO: remove DEBUG code
-	for k, v := range confToEnv {
-	    log.Info(fmt.Sprintf("%s=%v", k, v))
+	for k, v := range hooks.ConfToEnv {
+		log.Info(fmt.Sprintf("%s=%v", k, v))
 	}
 
 	log.Info("edgex-asc:configure hook running")
